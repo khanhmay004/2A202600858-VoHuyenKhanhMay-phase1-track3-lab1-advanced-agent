@@ -33,6 +33,8 @@ class AttemptTrace(BaseModel):
     reason: str
     reflection: Optional[ReflectionEntry] = None
     token_estimate: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     latency_ms: int = 0
 
 class RunRecord(BaseModel):
@@ -44,6 +46,8 @@ class RunRecord(BaseModel):
     is_correct: bool
     attempts: int
     token_estimate: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     latency_ms: int
     failure_mode: Literal["none", "entity_drift", "incomplete_multi_hop", "wrong_final_answer", "looping", "reflection_overfit"]
     reflections: list[ReflectionEntry] = Field(default_factory=list)

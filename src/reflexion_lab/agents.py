@@ -34,6 +34,8 @@ class BaseAgent:
             answer, actor_stats = actor_answer(example, attempt_id, self.agent_type, reflection_memory)
             judge, eval_stats = evaluator(example, answer)
             token_estimate = actor_stats.tokens + eval_stats.tokens
+            prompt_tokens = actor_stats.prompt_tokens + eval_stats.prompt_tokens
+            completion_tokens = actor_stats.completion_tokens + eval_stats.completion_tokens
             latency_ms = actor_stats.latency_ms + eval_stats.latency_ms
             final_answer = answer
             final_judge = judge
@@ -44,6 +46,8 @@ class BaseAgent:
             if self.agent_type == "reflexion" and judge.score != 1 and attempt_id < self.max_attempts:
                 ref, ref_stats = reflector(example, attempt_id, judge, answer)
                 token_estimate += ref_stats.tokens
+                prompt_tokens += ref_stats.prompt_tokens
+                completion_tokens += ref_stats.completion_tokens
                 latency_ms += ref_stats.latency_ms
                 reflections.append(ref)
                 reflection_memory.append(
@@ -54,19 +58,23 @@ class BaseAgent:
 
             traces.append(AttemptTrace(
                 attempt_id=attempt_id, answer=answer, score=judge.score, reason=judge.reason,
-                reflection=reflection, token_estimate=token_estimate, latency_ms=latency_ms,
+                reflection=reflection, token_estimate=token_estimate,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, latency_ms=latency_ms,
             ))
             if judge.score == 1:
                 break
 
         total_tokens = sum(t.token_estimate for t in traces)
+        total_prompt = sum(t.prompt_tokens for t in traces)
+        total_completion = sum(t.completion_tokens for t in traces)
         total_latency = sum(t.latency_ms for t in traces)
         final_score = final_judge.score if final_judge else 0
         failure_mode = classify_failure(final_judge, example.qid) if final_judge else "wrong_final_answer"
         return RunRecord(
             qid=example.qid, question=example.question, gold_answer=example.gold_answer,
             agent_type=self.agent_type, predicted_answer=final_answer, is_correct=bool(final_score),
-            attempts=len(traces), token_estimate=total_tokens, latency_ms=total_latency,
+            attempts=len(traces), token_estimate=total_tokens,
+            prompt_tokens=total_prompt, completion_tokens=total_completion, latency_ms=total_latency,
             failure_mode=failure_mode, reflections=reflections, traces=traces,
         )
 

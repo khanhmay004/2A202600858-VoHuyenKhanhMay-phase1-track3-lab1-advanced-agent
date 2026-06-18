@@ -24,6 +24,8 @@ class CallStats:
     """Token usage and wall-clock latency for a single model call."""
     tokens: int = 0
     latency_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -61,6 +63,12 @@ def _estimate_tokens(*parts: str) -> int:
     return max(1, sum(len(p) for p in parts) // 4)
 
 
+def _mock_stats(prompt_parts: list[str], completion: str, latency_ms: int) -> CallStats:
+    p = _estimate_tokens(*prompt_parts)
+    c = _estimate_tokens(completion)
+    return CallStats(tokens=p + c, latency_ms=latency_ms, prompt_tokens=p, completion_tokens=c)
+
+
 def _complete(system: str, user: str, json_mode: bool = False, temperature: float = 0.0) -> tuple[str, CallStats]:
     """Single chat-completion call. Returns (text, CallStats) with real token
     counts from usage metadata and measured latency."""
@@ -80,8 +88,15 @@ def _complete(system: str, user: str, json_mode: bool = False, temperature: floa
     latency_ms = int((time.perf_counter() - start) * 1000)
     text = (resp.choices[0].message.content or "").strip()
     usage = getattr(resp, "usage", None)
-    tokens = usage.total_tokens if usage and usage.total_tokens else _estimate_tokens(system, user, text)
-    return text, CallStats(tokens=tokens, latency_ms=latency_ms)
+    if usage and usage.total_tokens:
+        tokens = usage.total_tokens
+        prompt_tokens = usage.prompt_tokens or 0
+        completion_tokens = usage.completion_tokens or 0
+    else:
+        prompt_tokens = _estimate_tokens(system, user)
+        completion_tokens = _estimate_tokens(text)
+        tokens = prompt_tokens + completion_tokens
+    return text, CallStats(tokens=tokens, latency_ms=latency_ms, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
 
 
 def _parse_json(text: str) -> dict | None:
@@ -182,11 +197,11 @@ def mock_actor_answer(example: QAExample, attempt_id: int, agent_type: str, refl
         answer = FIRST_ATTEMPT_WRONG[example.qid]
     else:
         answer = example.gold_answer
-    return answer, CallStats(tokens=_estimate_tokens(example.question, answer), latency_ms=5)
+    return answer, _mock_stats([example.question, _format_context(example)], answer, 5)
 
 
 def mock_evaluator(example: QAExample, answer: str) -> tuple[JudgeResult, CallStats]:
-    stats = CallStats(tokens=_estimate_tokens(example.question, example.gold_answer, answer), latency_ms=4)
+    stats = _mock_stats([example.question, example.gold_answer, answer], answer, 4)
     if normalize_answer(example.gold_answer) == normalize_answer(answer):
         return JudgeResult(score=1, reason="Final answer matches the gold answer after normalization."), stats
     if normalize_answer(answer) == "london":
@@ -197,7 +212,7 @@ def mock_evaluator(example: QAExample, answer: str) -> tuple[JudgeResult, CallSt
 def mock_reflector(example: QAExample, attempt_id: int, judge: JudgeResult, answer: str = "") -> tuple[ReflectionEntry, CallStats]:
     strategy = "Do the second hop explicitly: birthplace city -> river through that city." if example.qid == "hp2" else "Verify the final entity against the second paragraph before answering."
     ref = ReflectionEntry(attempt_id=attempt_id, failure_reason=judge.reason, lesson="A partial first-hop answer is not enough; the final answer must complete all hops.", next_strategy=strategy)
-    return ref, CallStats(tokens=_estimate_tokens(example.question, judge.reason), latency_ms=4)
+    return ref, _mock_stats([example.question, judge.reason], strategy, 4)
 
 
 # --------------------------------------------------------------------------- #
